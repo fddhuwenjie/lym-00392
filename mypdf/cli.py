@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from .extractor import PDFTextExtractor, get_pdf_info
 from .indexer import PDFIndexer
+from .manipulator import merge_pdfs, split_pdf
 from .parser import PDFEncryptedError, PDFParseError
 
 
@@ -196,6 +197,60 @@ def cmd_list(args):
     return 0
 
 
+def cmd_split(args):
+    """Handle the 'split' command."""
+    filepath = args.file
+    pages = args.pages
+    output_dir = args.output
+
+    try:
+        output_files = split_pdf(filepath, pages, output_dir)
+
+        print(f"Split complete! Created {len(output_files)} file(s):")
+        for f in output_files:
+            print(f"  {f}")
+
+    except PDFEncryptedError:
+        print(f"Error: PDF is password protected: {filepath}", file=sys.stderr)
+        return 1
+    except PDFParseError as e:
+        print(f"Error parsing PDF: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError:
+        print(f"Error: File not found: {filepath}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def cmd_merge(args):
+    """Handle the 'merge' command."""
+    input_files = args.files
+    output = args.output
+
+    try:
+        output_file = merge_pdfs(input_files, output)
+        print(f"Merge complete! Output written to: {output_file}")
+
+    except PDFEncryptedError as e:
+        print(f"Error: PDF is password protected: {e}", file=sys.stderr)
+        return 1
+    except PDFParseError as e:
+        print(f"Error parsing PDF: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -233,6 +288,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     list_parser.add_argument('-n', '--limit', type=int, default=100,
                              help='Maximum number of documents to list (default: 100)')
     list_parser.set_defaults(func=cmd_list)
+
+    split_parser = subparsers.add_parser('split', help='Split PDF by page ranges')
+    split_parser.add_argument('file', help='PDF file to split')
+    split_parser.add_argument('--pages', required=True,
+                              help='Page ranges to extract, e.g. "1-3,5,7-9"')
+    split_parser.add_argument('--output', required=True,
+                              help='Output directory for split files')
+    split_parser.set_defaults(func=cmd_split)
+
+    merge_parser = subparsers.add_parser('merge', help='Merge multiple PDFs into one')
+    merge_parser.add_argument('files', nargs='+', help='PDF files to merge (in order)')
+    merge_parser.add_argument('--output', required=True,
+                              help='Output file path for merged PDF')
+    merge_parser.set_defaults(func=cmd_merge)
 
     args = parser.parse_args(argv)
 
