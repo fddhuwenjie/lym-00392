@@ -161,6 +161,22 @@ class ContentStreamParser:
                 tokens.append(PDFString(string_data.decode('latin-1', errors='replace')))
                 continue
 
+            if b == b'<':
+                if pos + 1 < len(data) and data[pos + 1:pos + 2] == b'<':
+                    pos += 2
+                    tokens.append('<<')
+                    continue
+                raw_bytes, pos = self._parse_hex_string(data, pos)
+                tokens.append(PDFString(raw_bytes.decode('latin-1', errors='replace')))
+                continue
+
+            if b == b'>':
+                pos += 1
+                if pos < len(data) and data[pos:pos + 1] == b'>':
+                    pos += 1
+                    tokens.append('>>')
+                continue
+
             if b == b'[':
                 pos += 1
                 tokens.append('[')
@@ -210,6 +226,32 @@ class ContentStreamParser:
                 i += 1
             else:
                 i += 1
+
+    def _parse_hex_string(self, data: bytes, pos: int) -> Tuple[bytes, int]:
+        """Parse a hex string <XXXX> from content stream, return (raw_bytes, new_pos)."""
+        pos += 1
+        hex_chars = bytearray()
+        hex_digits = b'0123456789abcdefABCDEF'
+        while pos < len(data):
+            hb = data[pos:pos + 1]
+            if hb == b'>':
+                pos += 1
+                break
+            if hb in b' \t\n\r\f':
+                pos += 1
+                continue
+            if hb in hex_digits:
+                hex_chars.extend(hb)
+                pos += 1
+            else:
+                pos += 1
+        if len(hex_chars) % 2 != 0:
+            hex_chars.append(ord('0'))
+        try:
+            raw = bytes.fromhex(hex_chars.decode('latin-1'))
+        except ValueError:
+            raw = bytes(len(hex_chars) // 2)
+        return raw, pos
 
     def _parse_literal_string(self, data: bytes, pos: int) -> Tuple[str, int]:
         """Parse a literal string from data starting at pos."""

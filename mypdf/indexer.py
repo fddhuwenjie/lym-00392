@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from typing import Dict, List, Optional
 
@@ -11,6 +12,17 @@ from .parser import PDFEncryptedError
 
 
 DEFAULT_INDEX_PATH = os.path.expanduser('~/.mypdf_index.db')
+
+_CJK_RE = re.compile(
+    r'[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff'
+    r'\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af'
+    r'\u3105-\u312c\u31a0-\u31bf\u31c0-\u31ef]'
+)
+
+
+def _tokenize_cjk(text: str) -> str:
+    """Insert spaces around CJK characters so FTS5 tokenizer sees them as tokens."""
+    return _CJK_RE.sub(lambda m: ' ' + m.group(0) + ' ', text)
 
 
 class PDFIndexer:
@@ -165,9 +177,10 @@ class PDFIndexer:
             )
             doc_id = cursor.lastrowid
 
+        fts_content = _tokenize_cjk(text)
         cursor.execute(
             'INSERT INTO pdf_fts (content, filepath, filename) VALUES (?, ?, ?)',
-            (text, filepath, os.path.basename(filepath))
+            (fts_content, filepath, os.path.basename(filepath))
         )
 
         pages_text = extractor._pages_text
@@ -184,12 +197,14 @@ class PDFIndexer:
         """Search the index for matching documents."""
         cursor = self.conn.cursor()
 
+        fts_query = _tokenize_cjk(query)
+
         try:
             cursor.execute(
                 '''SELECT 
                    pdf_fts.filepath,
                    pdf_fts.filename,
-                   pdf_fts.content,
+                   documents.id AS doc_id,
                    documents.title,
                    documents.author,
                    documents.pages,
@@ -199,14 +214,14 @@ class PDFIndexer:
                    WHERE pdf_fts MATCH ?
                    ORDER BY rank
                    LIMIT ?''',
-                (query, limit)
+                (fts_query, limit)
             )
         except sqlite3.OperationalError:
             cursor.execute(
                 '''SELECT 
                    pdf_fts.filepath,
                    pdf_fts.filename,
-                   pdf_fts.content,
+                   documents.id AS doc_id,
                    documents.title,
                    documents.author,
                    documents.pages
@@ -214,18 +229,29 @@ class PDFIndexer:
                    LEFT JOIN documents ON pdf_fts.filepath = documents.filepath
                    WHERE pdf_fts MATCH ?
                    LIMIT ?''',
-                (query, limit)
+                (fts_query, limit)
             )
 
         results = []
         for row in cursor.fetchall():
+            doc_id = row['doc_id']
+            raw_content = ''
+            if doc_id:
+                pcursor = self.conn.cursor()
+                pcursor.execute(
+                    'SELECT content FROM pages WHERE doc_id = ? ORDER BY page_num',
+                    (doc_id,)
+                )
+                raw_content = '\n'.join(
+                    (r['content'] or '') for r in pcursor.fetchall()
+                )
             result = {
                 'filepath': row['filepath'],
                 'filename': row['filename'],
                 'title': row['title'],
                 'author': row['author'],
                 'pages': row['pages'],
-                'snippets': self._get_snippets(row['content'], query),
+                'snippets': self._get_snippets(raw_content, query),
             }
             results.append(result)
 

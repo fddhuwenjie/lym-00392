@@ -64,14 +64,14 @@ class PDFTextExtractor:
             return self._pages_text[page_num]
         return ''
 
-    def get_info(self) -> Dict[str, str]:
+    def get_info(self) -> Dict:
         """Get document metadata."""
         self.load()
         info = self.document.get_info()
         result = {
             'filename': self.filename,
             'filepath': self.filepath,
-            'pages': str(self.page_count),
+            'pages': self.page_count,
         }
 
         title = info.get('Title', '')
